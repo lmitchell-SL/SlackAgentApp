@@ -9,6 +9,15 @@ export function escapeSlack(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * Neutralizes Slack special mentions (<!channel>, <!here>, <!everyone>, <!subteam^ID|label>)
+ * by escaping their angle brackets the same way escapeSlack does, so they show as text and
+ * ping nobody. Everything else is left alone, so the markdown keeps its formatting.
+ */
+export function neutralizeSpecialMentions(text: string): string {
+  return text.replace(/<!(channel|here|everyone|subteam\^[^>|\s]*)(\|[^>]*)?>/gi, (m) => escapeSlack(m));
+}
+
 type SlackResponse = { ok: boolean; error?: string; [k: string]: unknown };
 
 export async function slackApi<T extends SlackResponse = SlackResponse>(
@@ -62,9 +71,11 @@ export async function postMarkdown(channel: string, threadTs: string, markdown: 
     await postMessage({
       channel,
       thread_ts: threadTs,
-      // Escaped so agent text like "<!channel>" can't ping people through the fallback.
+      // Agent text like "<!channel>" must not ping people: the fallback is fully escaped,
+      // and in the markdown block only the special mentions are (so formatting survives).
+      // Chunks leave ~1,000 characters of headroom under the 12,000 limit for this.
       text: escapeSlack(plainFallback(piece)),
-      blocks: [{ type: "markdown", text: piece }],
+      blocks: [{ type: "markdown", text: neutralizeSpecialMentions(piece) }],
     });
   }
 }
