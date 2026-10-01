@@ -5,6 +5,8 @@ It runs on Netlify Functions (small pieces of server code that Netlify runs on d
 
 New here and not a coder? Follow **[SETUP.md](SETUP.md)**. It walks you through every click.
 
+Code: <https://github.com/lmitchell-SL/SlackAgentApp>
+
 ## What it does
 
 - In the channel, write `@SL Agents CFO Agent: what's our runway?`.

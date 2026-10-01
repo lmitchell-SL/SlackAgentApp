@@ -1,8 +1,12 @@
 {
-  "name": "slack-agent-bridge",
+  "name": "slackagentapp",
   "version": "1.0.0",
   "private": true,
   "description": "Slack bridge for Claude Console Managed Agents, hosted on Netlify Functions",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lmitchell-SL/SlackAgentApp.git"
+  },
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

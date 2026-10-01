@@ -15,7 +15,7 @@ Netlify is the service that runs this app on the internet.
 1. Go to <https://app.netlify.com> and log in.
 2. Click **Add new project** (it may say **Add new site**), then **Import an existing project**.
 3. Click **GitHub**. If asked, allow Netlify to see your GitHub account.
-4. Pick the repository **lmitchell-SL/slack-agent-bridge**.
+4. Pick the repository **lmitchell-SL/SlackAgentApp**.
 5. Leave all the build settings as they are. Click **Deploy**.
 6. Wait for the deploy to finish (a minute or two). The status turns green and says **Published**.
 7. At the top of the page you will see the site address, like `https://something-1234.netlify.app`.
