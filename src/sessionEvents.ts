@@ -116,14 +116,19 @@ export function pendingCustomTools(events: MinimalEvent[], onlyIds?: string[]): 
     .map((e) => ({ id: e.id, name: String(e.name ?? "custom tool") }));
 }
 
-/** Most recent session.error message, if any. */
-export function latestErrorMessage(events: MinimalEvent[]): string | null {
+/**
+ * Message of the most recent session.error that was not being retried (retry_status
+ * "terminal" or "exhausted"), i.e. an error that ended the session. Transient errors
+ * (retry_status "retrying") are ignored, so a session that recovered and ended normally
+ * returns null.
+ */
+export function terminalErrorMessage(events: MinimalEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i]!;
-    if (ev.type === "session.error") {
-      const err = ev.error as { message?: string; type?: string } | undefined;
-      return err?.message || err?.type || "unknown error";
-    }
+    if (ev.type !== "session.error") continue;
+    const err = ev.error as { message?: string; type?: string; retry_status?: { type?: string } } | undefined;
+    if (err?.retry_status?.type === "retrying") continue;
+    return err?.message || err?.type || "unknown error";
   }
   return null;
 }

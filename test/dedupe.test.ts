@@ -5,6 +5,7 @@ import {
   pendingToolConfirmations,
   runningAfterLatestIdle,
   selectNewAgentMessages,
+  terminalErrorMessage,
   type MinimalEvent,
 } from "../src/sessionEvents";
 import { classifySlackEvent, threadCommand } from "../src/slackEvents";
@@ -18,6 +19,8 @@ import {
   saveSessionRecord,
   saveThread,
   threadKey,
+  tryLock,
+  withLock,
 } from "../src/store";
 
 const msg = (id: string, text: string): MinimalEvent => ({ id, type: "agent.message", content: [{ type: "text", text }] });
@@ -70,6 +73,24 @@ describe("pending actions", () => {
   });
 });
 
+describe("terminalErrorMessage", () => {
+  const err = (id: string, retry: string, message: string): MinimalEvent => ({
+    id,
+    type: "session.error",
+    error: { type: "unknown_error", message, retry_status: { type: retry } },
+  });
+  it("is null when the session ended normally", () => {
+    expect(terminalErrorMessage(events)).toBeNull();
+  });
+  it("ignores transient errors that were being retried", () => {
+    expect(terminalErrorMessage([err("e1", "retrying", "overloaded"), msg("m9", "done")])).toBeNull();
+  });
+  it("returns the error that ended the session", () => {
+    expect(terminalErrorMessage([err("e1", "retrying", "overloaded"), err("e2", "terminal", "billing")])).toBe("billing");
+    expect(terminalErrorMessage([err("e3", "exhausted", "rate limited")])).toBe("rate limited");
+  });
+});
+
 describe("Slack event filtering", () => {
   const bot = "UBOT";
   const base = { channel: "C1", user: "U1", ts: "2.0" };
@@ -93,8 +114,15 @@ describe("Slack event filtering", () => {
     expect(ig({ subtype: "message_changed" })).toBe("ignore");
     expect(ig({ subtype: "message_deleted" })).toBe("ignore");
     expect(ig({ subtype: "channel_join" })).toBe("ignore");
+    expect(ig({ subtype: "bot_message" })).toBe("ignore");
     expect(ig({ user: "UBOT" })).toBe("ignore");
     expect(ig({ thread_ts: undefined })).toBe("ignore");
+  });
+  it("accepts 'also send to channel' replies and file uploads with text", () => {
+    const k = (subtype: string) =>
+      classifySlackEvent({ ...base, type: "message", thread_ts: "1.0", text: "x", subtype }, bot).kind;
+    expect(k("thread_broadcast")).toBe("thread_message");
+    expect(k("file_share")).toBe("thread_message");
   });
   it("recognises thread commands", () => {
     expect(threadCommand("stop")).toBe("stop");
@@ -146,5 +174,33 @@ describe("store: thread mapping and one-time claims", () => {
     await run();
     expect(postedToSlack.sort()).toEqual(["m1", "m2"]);
     expect((await getSessionRecord("s1", store))?.postedEventIds.sort()).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("locks", () => {
+  it("serializes runs so the second waits for the first", async () => {
+    const store = new MemoryKV();
+    const order: string[] = [];
+    const run = (name: string, ms: number) =>
+      withLock("session/s1", async () => {
+        order.push(`${name}-start`);
+        await new Promise((r) => setTimeout(r, ms));
+        order.push(`${name}-end`);
+      }, { pollMs: 5 }, store);
+    await Promise.all([run("a", 30), run("b", 1)]);
+    expect(order).toEqual(["a-start", "a-end", "b-start", "b-end"]);
+  });
+
+  it("refuses a live lock but takes over an expired one", async () => {
+    const store = new MemoryKV();
+    const release = await tryLock("thread-start/C1:1.0", 60_000, store);
+    expect(release).not.toBeNull();
+    expect(await tryLock("thread-start/C1:1.0", 60_000, store)).toBeNull();
+    await release!();
+    expect(await tryLock("thread-start/C1:1.0", 60_000, store)).not.toBeNull();
+
+    const stale = new MemoryKV();
+    expect(await tryLock("x", -1, stale)).not.toBeNull(); // already expired
+    expect(await tryLock("x", 60_000, stale)).not.toBeNull();
   });
 });

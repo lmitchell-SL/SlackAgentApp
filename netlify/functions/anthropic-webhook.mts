@@ -5,8 +5,7 @@
 import type { Config } from "@netlify/functions";
 import { unwrapWebhook } from "../../src/anthropic";
 import { HANDLED_WEBHOOK_TYPES } from "../../src/bridge";
-import { handOff, WEBHOOK_SIGNATURE_HEADERS } from "../../src/handoff";
-import { claim, releaseClaim } from "../../src/store";
+import { forwardOnce, WEBHOOK_SIGNATURE_HEADERS } from "../../src/handoff";
 
 export default async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -22,17 +21,15 @@ export default async (req: Request): Promise<Response> => {
   }
 
   if (!HANDLED_WEBHOOK_TYPES.has(event.data.type)) return new Response("", { status: 204 });
-  // Every retry of the same event carries the same id.
-  if (!(await claim("webhook", event.id))) return new Response("", { status: 204 });
-
-  try {
-    await handOff(req, raw, "anthropic-webhook-background", WEBHOOK_SIGNATURE_HEADERS);
-  } catch (err) {
-    console.error(err);
-    await releaseClaim("webhook", event.id);
-    return new Response("Hand-off failed", { status: 500 }); // Anthropic will retry
-  }
-  return new Response("", { status: 204 });
+  // Every retry of the same event carries the same id; a failed hand-off answers 500 so
+  // Anthropic retries it.
+  const result = await forwardOnce(req, raw, {
+    scope: "webhook",
+    id: event.id,
+    functionName: "anthropic-webhook-background",
+    headers: WEBHOOK_SIGNATURE_HEADERS,
+  });
+  return result === "failed" ? new Response("Hand-off failed", { status: 500 }) : new Response("", { status: 204 });
 };
 
 export const config: Config = { path: "/anthropic-webhook", method: "POST" };

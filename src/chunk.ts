@@ -48,6 +48,8 @@ export function chunkMarkdown(text: string, max = DEFAULT_CHUNK_SIZE): string[] 
         flush();
         current = carry;
         currentLen = carry.join("\n").length;
+        // The carried lines plus this line may still be too long: then flush them on their own.
+        if (current.length && currentLen + 1 + line.length + closeLen() > max) flush();
       } else {
         flush();
       }

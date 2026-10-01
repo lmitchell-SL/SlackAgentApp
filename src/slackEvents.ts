@@ -20,6 +20,9 @@ export interface SlackEventEnvelope {
   authorizations?: Array<{ user_id?: string }>;
 }
 
+/** Subtypes that are still a person writing a message: "also send to channel" and file uploads. */
+const HUMAN_SUBTYPES = new Set(["thread_broadcast", "file_share"]);
+
 export type Classified =
   | { kind: "mention"; channel: string; user: string; text: string; ts: string; threadTs: string; inThread: boolean }
   | { kind: "thread_message"; channel: string; user: string; text: string; ts: string; threadTs: string }
@@ -28,12 +31,13 @@ export type Classified =
 /**
  * Slack sends both `app_mention` and `message` for a message that @mentions the bot.
  * We handle mentions only via `app_mention`, and skip `message` events that contain
- * the bot's user id. Bot messages, edits, deletes and other subtypes are ignored.
+ * the bot's user id. Bot messages, edits, deletes and other subtypes are ignored, except
+ * thread_broadcast and file_share, which are people writing in the thread.
  */
 export function classifySlackEvent(ev: SlackMessageEvent | undefined, botUserId: string): Classified {
   if (!ev) return { kind: "ignore", reason: "no event" };
   if (ev.bot_id) return { kind: "ignore", reason: "bot message" };
-  if (ev.subtype) return { kind: "ignore", reason: `subtype ${ev.subtype}` };
+  if (ev.subtype && !HUMAN_SUBTYPES.has(ev.subtype)) return { kind: "ignore", reason: `subtype ${ev.subtype}` };
   if (ev.edited) return { kind: "ignore", reason: "edited" };
   if (!ev.channel || !ev.user || !ev.ts) return { kind: "ignore", reason: "missing fields" };
   if (ev.user === botUserId) return { kind: "ignore", reason: "own message" };

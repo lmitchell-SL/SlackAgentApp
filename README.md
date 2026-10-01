@@ -25,20 +25,23 @@ Slack ◄── anthropic-webhook-background ◄── /anthropic-webhook ◄─
 Slack ──► /slack/interactive ──► slack-interactive-background ──► Anthropic API (tool confirmation)
 ```
 
-1. **`slack-events`** checks Slack's signature, answers Slack's URL check, ignores Slack retries,
-   checks the channel is allowed, drops duplicate event ids, then hands the raw request to a
+1. **`slack-events`** checks Slack's signature, answers Slack's URL check, checks the channel is
+   allowed, skips event ids it already handled, then hands the raw request to a
    **background function** and answers Slack within 3 seconds. Background functions are named
-   `*-background` and can run for up to 15 minutes.
+   `*-background` and can run for up to 15 minutes. An event id is marked as handled only after the
+   hand-off works; if the hand-off fails, Slack gets an error and retries (retries are processed
+   like first deliveries).
 2. **`slack-events-background`** checks the signature again, works out which agent you meant
    (the agent list is read live from the API and cached for 5 minutes), and creates a session.
-   The session's environment and vaults are copied from that agent's most recent session; if there
-   is none, it uses `AGENT_SETTINGS`, then `DEFAULT_ENVIRONMENT_ID` / `DEFAULT_VAULT_IDS`, then the
-   first environment in the workspace. Every message to the agent starts with
+   The session's environment and vaults come from, in order: `AGENT_SETTINGS` for that agent,
+   then that agent's most recent session, then `DEFAULT_ENVIRONMENT_ID` / `DEFAULT_VAULT_IDS`,
+   then the first non-archived environment in the workspace. Every message to the agent starts with
    `[From <name> via Slack]` so the agent knows who is talking.
 3. When the agent stops working, Anthropic calls **`anthropic-webhook`**. It checks the signature
    with the SDK's `client.beta.webhooks.unwrap`, drops duplicates, and hands off to
    **`anthropic-webhook-background`**, which reads the session's events and posts every new agent
    message (as Slack markdown, split if long), then any Approve / Deny buttons or status notes.
+   A session that ends normally stays quiet; one that ends with an error gets a short note.
 4. **`slack-interactive`** handles button clicks and sends the decision to the agent.
 
 State (which thread belongs to which session, what was already posted) is kept in **Netlify Blobs**,
@@ -59,7 +62,7 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
 | `CONSOLE_WORKSPACE` | No | Console workspace ID used in session links. Empty means `default`. |
 | `DEFAULT_ENVIRONMENT_ID` | No | Environment to use when an agent has no earlier session to copy from. |
 | `DEFAULT_VAULT_IDS` | No | Comma-separated vault IDs to attach in that case. |
-| `AGENT_SETTINGS` | No | JSON map: `{"agent_id": {"environment_id": "env_...", "vault_ids": ["vlt_..."]}}`. |
+| `AGENT_SETTINGS` | No | JSON map: `{"agent_id": {"environment_id": "env_...", "vault_ids": ["vlt_..."]}}`. Takes priority over copying from the agent's last session. |
 
 ## Security notes
 
@@ -74,6 +77,14 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
   functions re-check the forwarded signatures, so calling them directly does nothing.
 - The bridge never creates, edits or archives agents. It only starts sessions for existing agents.
 - Messages are posted to Slack, so anything an agent writes is visible to the whole channel.
+
+## Limits
+
+- Each idle webhook re-reads the session's full event list, which is fine for normal chats but
+  can get slow for very long sessions.
+- Webhooks are not a durable log: if Anthropic gives up delivering one, replies from that turn
+  appear only after the agent's next turn (or in the Console).
+- The bridge can't run custom tools; it tells the agent so when one is called.
 
 ## Development
 

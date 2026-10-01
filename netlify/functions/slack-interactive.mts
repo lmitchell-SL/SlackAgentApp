@@ -20,6 +20,8 @@ export default async (req: Request): Promise<Response> => {
     await handOff(req, raw, "slack-interactive-background", SLACK_SIGNATURE_HEADERS);
   } catch (err) {
     console.error(err);
+    // A non-200 makes Slack show the click failed, so the person can try again.
+    return new Response("Hand-off failed", { status: 500 });
   }
   return new Response("", { status: 200 });
 };

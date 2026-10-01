@@ -1,6 +1,7 @@
 // State kept in Netlify Blobs (a simple key-value store that Netlify hosts for the site).
 // Everything goes through the small KV interface so tests can use an in-memory copy.
 
+import { randomUUID } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 
 export interface KV {
@@ -133,8 +134,77 @@ export async function claim(scope: string, id: string, store = kv()): Promise<bo
   return store.set(keys.claim(scope, id), { at: new Date().toISOString() }, { onlyIfNew: true });
 }
 
+/** True when the id has already been claimed (handled). */
+export async function isClaimed(scope: string, id: string, store = kv()): Promise<boolean> {
+  return (await store.get(keys.claim(scope, id))) !== null;
+}
+
 export async function releaseClaim(scope: string, id: string, store = kv()): Promise<void> {
   await store.delete(keys.claim(scope, id));
+}
+
+/**
+ * Runs fn once per (scope, id). If fn throws, the claim is released so a later run can
+ * retry. Returns false when another run already claimed it.
+ */
+export async function runOnce(scope: string, id: string, fn: () => Promise<void>, store = kv()): Promise<boolean> {
+  if (!(await claim(scope, id, store))) return false;
+  try {
+    await fn();
+  } catch (err) {
+    await releaseClaim(scope, id, store);
+    throw err;
+  }
+  return true;
+}
+
+// ---- Locks with expiry ---------------------------------------------------------
+
+interface LockValue {
+  until: number;
+  token: string;
+}
+
+/**
+ * Takes a lock that expires after ttlMs (so a crashed function can't hold it forever).
+ * Returns a release function, or null when someone else holds a live lock.
+ */
+export async function tryLock(name: string, ttlMs: number, store = kv()): Promise<(() => Promise<void>) | null> {
+  const key = `lock/${name}`;
+  const now = Date.now();
+  const mine: LockValue = { until: now + ttlMs, token: randomUUID() };
+  const cur = await store.get<LockValue>(key);
+  let got: boolean;
+  if (!cur) got = await store.set(key, mine, { onlyIfNew: true });
+  else if (cur.value.until < now && cur.etag) got = await store.set(key, mine, { onlyIfMatch: cur.etag });
+  else got = false;
+  if (!got) return null;
+  return async () => {
+    const held = await store.get<LockValue>(key);
+    if (held?.value.token === mine.token) await store.delete(key);
+  };
+}
+
+/** Runs fn while holding the lock, waiting (polling) up to waitMs for it. */
+export async function withLock<T>(
+  name: string,
+  fn: () => Promise<T>,
+  opts: { ttlMs?: number; waitMs?: number; pollMs?: number } = {},
+  store = kv(),
+): Promise<T> {
+  const { ttlMs = 5 * 60_000, waitMs = 2 * 60_000, pollMs = 1000 } = opts;
+  const deadline = Date.now() + waitMs;
+  let release = await tryLock(name, ttlMs, store);
+  while (!release) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for lock ${name}`);
+    await new Promise((r) => setTimeout(r, pollMs));
+    release = await tryLock(name, ttlMs, store);
+  }
+  try {
+    return await fn();
+  } finally {
+    await release();
+  }
 }
 
 // ---- Small caches ------------------------------------------------------------

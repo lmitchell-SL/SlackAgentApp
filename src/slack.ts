@@ -62,7 +62,8 @@ export async function postMarkdown(channel: string, threadTs: string, markdown: 
     await postMessage({
       channel,
       thread_ts: threadTs,
-      text: plainFallback(piece),
+      // Escaped so agent text like "<!channel>" can't ping people through the fallback.
+      text: escapeSlack(plainFallback(piece)),
       blocks: [{ type: "markdown", text: piece }],
     });
   }

@@ -53,6 +53,14 @@ describe("matchAgent", () => {
     expect(m(text)).toEqual({ name, rest });
   });
 
+  it("keeps a leading word 'agent' that belongs to the question", () => {
+    expect(m("Marketing: agent onboarding plan")).toEqual({ name: "Marketing Agent", rest: "agent onboarding plan" });
+    expect(m("Legal agent: review")).toEqual({ name: "Legal Agent", rest: "review" });
+    expect(m("AETHON agent: check")).toEqual({ name: "AETHON Ethics & Compliance Agent", rest: "check" });
+    expect(m("AETHON: agent rules")).toEqual({ name: "AETHON Ethics & Compliance Agent", rest: "agent rules" });
+    expect(m("Legal, agent fees?")).toEqual({ name: "Legal Agent", rest: "agent fees?" });
+  });
+
   it("returns an empty rest when only the name is given", () => {
     expect(m("CFO Agent")).toEqual({ name: "CFO Agent", rest: "" });
   });

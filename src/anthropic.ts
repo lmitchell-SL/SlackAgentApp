@@ -33,40 +33,61 @@ export async function listAgents(): Promise<AgentRef[]> {
 export interface SessionPlacement {
   environment_id: string;
   vault_ids: string[];
-  source: "recent-session" | "AGENT_SETTINGS" | "defaults" | "first-environment";
+  source: "AGENT_SETTINGS" | "recent-session" | "defaults" | "first-environment";
 }
+
+export interface PlacementSources {
+  agentSettings: Record<string, AgentSetting>;
+  /** environment_id + vault_ids of the agent's most recent session, if any. */
+  latestSession: (agentId: string) => Promise<{ environment_id: string; vault_ids: string[] } | null>;
+  defaultEnvironmentId: string | undefined;
+  defaultVaultIds: string[];
+  /** First non-archived environment in the workspace, if any. */
+  firstEnvironment: () => Promise<string | null>;
+}
+
+const liveSources = (): PlacementSources => ({
+  agentSettings: config.agentSettings,
+  defaultEnvironmentId: config.defaultEnvironmentId,
+  defaultVaultIds: config.defaultVaultIds,
+  latestSession: async (agentId) => {
+    // sessions.list filters by agent_id and sorts newest first ("desc" is the default).
+    const page = await anthropic().beta.sessions.list({ agent_id: agentId, limit: 1, order: "desc" });
+    const recent = page.data[0];
+    return recent?.environment_id ? { environment_id: recent.environment_id, vault_ids: recent.vault_ids ?? [] } : null;
+  },
+  firstEnvironment: async () => {
+    for await (const env of anthropic().beta.environments.list({ limit: 100 })) {
+      if (!env.archived_at) return env.id;
+    }
+    return null;
+  },
+});
 
 /**
  * Where a new session runs and which vaults (stored credentials) it gets:
- * 1) copy from the agent's most recent session, 2) AGENT_SETTINGS, 3) DEFAULT_* env vars,
- * 4) the first non-archived environment in the workspace.
+ * 1) AGENT_SETTINGS for that agent, 2) the agent's most recent session,
+ * 3) DEFAULT_ENVIRONMENT_ID / DEFAULT_VAULT_IDS, 4) the first non-archived environment.
  */
-export async function resolvePlacement(agentId: string): Promise<SessionPlacement> {
-  try {
-    // sessions.list supports agent_id filtering, newest first by default (order: "desc").
-    const page = await anthropic().beta.sessions.list({ agent_id: agentId, limit: 1, order: "desc" });
-    const recent = page.data[0];
-    if (recent?.environment_id) {
-      return { environment_id: recent.environment_id, vault_ids: recent.vault_ids ?? [], source: "recent-session" };
-    }
-  } catch (err) {
-    console.warn(`Could not list recent sessions for ${agentId}: ${String(err)}`);
-  }
-
-  const setting: AgentSetting | undefined = config.agentSettings[agentId];
+export async function resolvePlacement(agentId: string, sources: PlacementSources = liveSources()): Promise<SessionPlacement> {
+  const setting = sources.agentSettings[agentId];
   if (setting?.environment_id) {
     return { environment_id: setting.environment_id, vault_ids: setting.vault_ids ?? [], source: "AGENT_SETTINGS" };
   }
 
-  if (config.defaultEnvironmentId) {
-    return { environment_id: config.defaultEnvironmentId, vault_ids: config.defaultVaultIds, source: "defaults" };
+  try {
+    const recent = await sources.latestSession(agentId);
+    if (recent) return { ...recent, source: "recent-session" };
+  } catch (err) {
+    console.warn(`Could not list recent sessions for ${agentId}: ${String(err)}`);
   }
 
-  for await (const env of anthropic().beta.environments.list({ limit: 100 })) {
-    if (!env.archived_at) {
-      return { environment_id: env.id, vault_ids: config.defaultVaultIds, source: "first-environment" };
-    }
+  if (sources.defaultEnvironmentId) {
+    return { environment_id: sources.defaultEnvironmentId, vault_ids: sources.defaultVaultIds, source: "defaults" };
   }
+
+  const first = await sources.firstEnvironment();
+  if (first) return { environment_id: first, vault_ids: sources.defaultVaultIds, source: "first-environment" };
   throw new Error("No environment found. Set DEFAULT_ENVIRONMENT_ID or create an environment in the Console.");
 }
 

@@ -13,6 +13,7 @@ export interface AgentMatch {
 
 interface Token {
   value: string;
+  start: number;
   end: number;
 }
 
@@ -34,7 +35,7 @@ function tokenize(text: string): Token[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const raw = m[0];
-    out.push({ value: raw === "&" ? "and" : raw.toLowerCase(), end: m.index + raw.length });
+    out.push({ value: raw === "&" ? "and" : raw.toLowerCase(), start: m.index, end: m.index + raw.length });
   }
   return out;
 }
@@ -54,15 +55,22 @@ function nameVariants(name: string): string[][] {
   return variants;
 }
 
-function startsWith(tokens: Token[], words: string[]): boolean {
+/** True when two tokens are part of one phrase: no ":", ",", ";" or line break between them. */
+function joined(text: string, a: Token, b: Token): boolean {
+  return !/[:,;\n]/.test(text.slice(a.end, b.start));
+}
+
+function startsWith(text: string, tokens: Token[], words: string[]): boolean {
   if (words.length === 0 || tokens.length < words.length) return false;
-  return words.every((w, i) => tokens[i]!.value === w);
+  return words.every((w, i) => tokens[i]!.value === w && (i === 0 || joined(text, tokens[i - 1]!, tokens[i]!)));
 }
 
 function restAfter(text: string, tokens: Token[], count: number): string {
-  // An optional "agent" word right after the name ("Legal agent: ...") is also consumed.
+  // An optional "agent" word right after the name ("Legal agent: ...") is also consumed,
+  // but not across a separator ("AETHON: agent rules" keeps it as part of the question).
   let n = count;
-  if (tokens[n]?.value === "agent") n += 1;
+  const next = tokens[n];
+  if (next?.value === "agent" && joined(text, tokens[n - 1]!, next)) n += 1;
   const cut = tokens[n - 1]!.end;
   return text
     .slice(cut)
@@ -91,7 +99,7 @@ export function matchAgent(text: string, agents: AgentRef[]): AgentMatch | null 
   let best: { agent: AgentRef; count: number; chars: number } | null = null;
   for (const agent of agents) {
     for (const words of nameVariants(agent.name)) {
-      if (!startsWith(tokens, words)) continue;
+      if (!startsWith(clean, tokens, words)) continue;
       const chars = words.join(" ").length;
       if (!best || words.length > best.count || (words.length === best.count && chars > best.chars)) {
         best = { agent, count: words.length, chars };

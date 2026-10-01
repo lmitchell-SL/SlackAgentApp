@@ -24,6 +24,14 @@ describe("chunkMarkdown", () => {
     for (const c of chunks) expect(c.length).toBeLessThan(MARKDOWN_BLOCK_LIMIT);
   });
 
+  it("re-checks the limit after breaking at a blank line", () => {
+    const max = 1000;
+    const text = [...Array(20).fill("short"), "", "x".repeat(500), "y".repeat(600)].join("\n");
+    const chunks = chunkMarkdown(text, max);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(max);
+    expect(chunks.join("\n").replace(/\s+/g, "")).toBe(text.replace(/\s+/g, ""));
+  });
+
   it("hard-splits a single very long line", () => {
     const chunks = chunkMarkdown("a".repeat(5000), 1000);
     expect(chunks.length).toBeGreaterThanOrEqual(5);

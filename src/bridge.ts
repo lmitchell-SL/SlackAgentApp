@@ -16,7 +16,7 @@ import {
 } from "./anthropic";
 import { consoleSessionUrl, isAllowedChannel, isApprover } from "./config";
 import {
-  latestErrorMessage,
+  terminalErrorMessage,
   latestIdle,
   pendingCustomTools,
   pendingToolConfirmations,
@@ -45,8 +45,11 @@ import {
   getSessionRecord,
   getThread,
   releaseClaim,
+  runOnce,
   saveSessionRecord,
   saveThread,
+  tryLock,
+  withLock,
   type SessionRecord,
   type ThreadRecord,
 } from "./store";
@@ -98,17 +101,19 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
 
-  // Only one session per thread, even if two mentions arrive at once.
-  if (!(await claim("thread-start", `${channel}:${threadTs}`))) {
-    const existing = await getThread(channel, threadTs);
-    if (existing) return handleFollowUp(channel, threadTs, ts, user, text, existing);
+  // Only one session per thread, even if two mentions arrive at once. The lock expires,
+  // so a crash mid-start can't block the thread for good.
+  const release = await tryLock(`thread-start/${channel}:${threadTs}`, 10 * 60_000);
+  if (!release) {
     await postNote(channel, threadTs, "I'm still starting a session in this thread. Try again in a moment.");
     return;
   }
-
   try {
-    const name = await displayName(user);
-    const placement = await resolvePlacement(match.agent.id);
+    // Another start may have finished just before we got the lock.
+    const existing = await getThread(channel, threadTs);
+    if (existing) return await handleFollowUp(channel, threadTs, ts, user, match.rest, existing);
+
+    const [name, placement] = await Promise.all([displayName(user), resolvePlacement(match.agent.id)]);
     const session = await createSession({
       agent: match.agent,
       placement,
@@ -127,9 +132,10 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     );
     await addReaction(channel, ts, "eyes");
   } catch (err) {
-    await releaseClaim("thread-start", `${channel}:${threadTs}`);
     console.error("Session create failed", err);
     await postNote(channel, threadTs, `:x: I couldn't start a session with *${escapeSlack(match.agent.name)}*: ${escapeSlack(errMsg(err))}`);
+  } finally {
+    await release();
   }
 }
 
@@ -175,6 +181,11 @@ export const HANDLED_WEBHOOK_TYPES = new Set(["session.status_idled", "session.s
 export async function handleSessionWebhook(event: BetaWebhookEvent): Promise<void> {
   if (!HANDLED_WEBHOOK_TYPES.has(event.data.type)) return;
   const sessionId = event.data.id;
+  // One sync per session at a time, so replies are posted in order even when webhooks overlap.
+  await withLock(`session/${sessionId}`, () => syncFromWebhook(sessionId));
+}
+
+async function syncFromWebhook(sessionId: string): Promise<void> {
   const session = await retrieveSession(sessionId);
 
   let rec = await getSessionRecord(sessionId);
@@ -203,14 +214,8 @@ export async function syncSessionToSlack(sessionId: string, rec: SessionRecord, 
   const posted: string[] = [];
   try {
     for (const msg of selectNewAgentMessages(events, rec.postedEventIds)) {
-      if (!(await claim("post", `${sessionId}/${msg.id}`))) continue; // another run is posting it
-      try {
-        await postMarkdown(rec.channel, rec.thread_ts, msg.text);
-        posted.push(msg.id);
-      } catch (err) {
-        await releaseClaim("post", `${sessionId}/${msg.id}`);
-        throw err;
-      }
+      const done = await runOnce("post", `${sessionId}/${msg.id}`, () => postMarkdown(rec.channel, rec.thread_ts, msg.text));
+      if (done) posted.push(msg.id);
     }
   } finally {
     await addPostedEventIds(sessionId, posted, rec);
@@ -218,14 +223,13 @@ export async function syncSessionToSlack(sessionId: string, rec: SessionRecord, 
 
   // 2) Then react to why the session stopped.
   if (status === "terminated") {
-    if (await claim("terminated", sessionId)) {
-      const error = latestErrorMessage(events);
+    // A normal end stays quiet; only an error end gets a note.
+    const error = terminalErrorMessage(events);
+    if (error && (await claim("terminated", sessionId))) {
       await postNote(
         rec.channel,
         rec.thread_ts,
-        error
-          ? `:warning: This session ended with an error: ${escapeSlack(error)}\nStart a new thread to try again.`
-          : "This session has ended. Start a new thread to talk to the agent again.",
+        `:warning: This session ended with an error: ${escapeSlack(error)}\nStart a new thread to try again.`,
       );
     }
     return;
@@ -238,22 +242,18 @@ export async function syncSessionToSlack(sessionId: string, rec: SessionRecord, 
   if (idle.stop_reason.type === "requires_action") {
     const ids = "event_ids" in idle.stop_reason ? idle.stop_reason.event_ids : undefined;
     for (const call of pendingToolConfirmations(events, ids)) {
-      if (!(await claim("approval", call.id))) continue;
-      try {
+      await runOnce("approval", call.id, async () => {
         await postMessage({
           channel: rec.channel,
           thread_ts: rec.thread_ts,
           text: `${agentName} wants to use ${call.name}. Approve or deny?`,
           blocks: approvalBlocks(agentName, sessionId, call),
         });
-      } catch (err) {
-        await releaseClaim("approval", call.id);
-        throw err;
-      }
+      });
     }
     for (const tool of pendingCustomTools(events, ids)) {
-      if (!(await claim("custom", tool.id))) continue;
-      await rejectCustomTool(sessionId, tool.id, tool.name);
+      const done = await runOnce("custom", tool.id, () => rejectCustomTool(sessionId, tool.id, tool.name));
+      if (!done) continue;
       await postNote(
         rec.channel,
         rec.thread_ts,
