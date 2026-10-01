@@ -1,0 +1,9 @@
+# Netlify build settings for the Slack Agent Bridge.
+# There is no website to build: the site is just serverless functions.
+[build]
+  command = "echo 'No build step needed'"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
