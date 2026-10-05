@@ -3,7 +3,7 @@ import { computeSlackSignature } from "../src/slackVerify";
 import { MemoryKV, setKV } from "../src/store";
 
 process.env.SLACK_SIGNING_SECRET = "s3cret";
-process.env.ALLOWED_CHANNEL_IDS = "C0C6T53G5J4";
+process.env.ALLOWED_CHANNEL_IDS = "C0EXAMPLE01";
 const { default: slackEvents } = await import("../netlify/functions/slack-events.mts");
 
 function slackRequest(body: object, retryNum?: string) {
@@ -21,7 +21,7 @@ function slackRequest(body: object, retryNum?: string) {
 const event = {
   type: "event_callback",
   event_id: "Ev123",
-  event: { type: "app_mention", channel: "C0C6T53G5J4", user: "U1", ts: "1.0", text: "<@UBOT> CFO: hi" },
+  event: { type: "app_mention", channel: "C0EXAMPLE01", user: "U1", ts: "1.0", text: "<@UBOT> CFO: hi" },
 };
 
 describe("slack-events retries and hand-off", () => {

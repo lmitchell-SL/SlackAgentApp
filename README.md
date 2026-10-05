@@ -16,7 +16,7 @@ Code: <https://github.com/lmitchell-SL/SlackAgentApp>
 - The agent's answers appear in that thread. Reply in the thread (no @mention needed) to keep talking.
 - If the agent wants to use a tool that needs permission, the thread shows **Approve** / **Deny** buttons.
 - In a thread, `stop` interrupts the agent. `new session` or `reset` tells you to start a new thread.
-- `@SL Agents agents` (or `help`, `list`) shows every agent and an example.
+- `@SL Agents agents` (or `help`, `list`) shows every agent and an example, or only the paired agent in a locked channel.
 
 ## How it works (short)
 
@@ -59,12 +59,27 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
 | `ANTHROPIC_WEBHOOK_SIGNING_KEY` | Yes | The `whsec_...` secret shown once when you create the Console webhook. |
 | `SLACK_BOT_TOKEN` | Yes | Slack "Bot User OAuth Token" (`xoxb-...`). |
 | `SLACK_SIGNING_SECRET` | Yes | Slack app "Signing Secret". |
-| `ALLOWED_CHANNEL_IDS` | Yes | Comma-separated channel IDs where the bot works, e.g. `C0C6T53G5J4`. Empty means the bot answers nowhere. |
+| `ALLOWED_CHANNEL_IDS` | Yes | Comma-separated channel IDs where the bot works, e.g. `C0EXAMPLE01`. Empty means the bot answers nowhere. |
+| `CHANNEL_AGENTS` | No | Lock channels to one agent with semicolon-separated pairs, e.g. `C0EXAMPLE01=CFO Agent; C0EXAMPLE02=Chief of Staff`. Spaces are trimmed and full agent names ignore case. Channels must still be in `ALLOWED_CHANNEL_IDS`. Empty or missing leaves routing unchanged. |
 | `APPROVER_USER_IDS` | No | Comma-separated Slack user IDs allowed to press Approve / Deny. Empty means anyone in the channel. |
 | `CONSOLE_WORKSPACE` | No | Console workspace ID used in session links. Empty means `default`. |
 | `DEFAULT_ENVIRONMENT_ID` | No | Environment to use when an agent has no earlier session to copy from. |
 | `DEFAULT_VAULT_IDS` | No | Comma-separated vault IDs to attach in that case. |
 | `AGENT_SETTINGS` | No | JSON map: `{"agent_id": {"environment_id": "env_...", "vault_ids": ["vlt_..."]}}`. Takes priority over copying from the agent's last session. |
+
+### Pair a channel with an agent
+
+Set `CHANNEL_AGENTS` to pair each channel with one agent from the existing agent list.
+In a paired channel, write `@SL Agents what's our runway?` without an agent name.
+Naming the paired agent still works; naming a different agent gets a thread reply saying
+the channel is set up for the paired agent only. `@SL Agents agents` lists only that agent.
+Thread replies, `stop`, and Approve / Deny buttons work as before.
+Channels not paired keep the usual agent-name routing, and pairing never grants channel access.
+If the agent name does not exist, the bot asks an admin to check `CHANNEL_AGENTS` instead of starting a session.
+Use full agent names, not message shortcuts such as `CFO`. For duplicate channel entries,
+the first pairing wins and an error is logged. Malformed entries are logged without their values;
+a recognizable channel with an empty or malformed agent value stays locked with a setup error.
+All channel IDs shown here are made-up placeholders; replace them with your own in Netlify only.
 
 ## Security notes
 

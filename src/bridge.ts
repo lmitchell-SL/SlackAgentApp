@@ -14,7 +14,7 @@ import {
   sendUserMessage,
   userText,
 } from "./anthropic";
-import { consoleSessionUrl, isAllowedChannel, isApprover } from "./config";
+import { config, consoleSessionUrl, isAllowedChannel, isApprover } from "./config";
 import {
   terminalErrorMessage,
   latestIdle,
@@ -87,11 +87,26 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
 
-  if (isHelpRequest(text)) {
-    await postNote(channel, threadTs, formatAgentList(agents));
+  const pairedName = config.channelAgents.get(channel);
+  const pairedAgent = pairedName === undefined
+    ? undefined
+    : agents.find((agent) => agent.name.trim().toLowerCase() === pairedName.toLowerCase());
+  if (pairedName !== undefined && !pairedAgent) {
+    console.error("CHANNEL_AGENTS pairing does not match an available agent; check the configured agent name");
+    await postNote(channel, threadTs, "This channel's agent isn't set up correctly. Ask an admin to check CHANNEL_AGENTS.");
     return;
   }
-  const match = matchAgent(text, agents);
+
+  if (isHelpRequest(text)) {
+    await postNote(channel, threadTs, formatAgentList(pairedAgent ? [pairedAgent] : agents));
+    return;
+  }
+  const namedAgent = matchAgent(text, agents);
+  if (pairedAgent && namedAgent && namedAgent.agent.id !== pairedAgent.id) {
+    await postNote(channel, threadTs, `This channel is set up for ${escapeSlack(pairedAgent.name)} only.`);
+    return;
+  }
+  const match = namedAgent ?? (pairedAgent ? { agent: pairedAgent, rest: text } : null);
   if (!match) {
     await postNote(channel, threadTs, `I couldn't tell which agent you meant.\n\n${formatAgentList(agents)}`);
     return;

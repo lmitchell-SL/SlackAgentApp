@@ -24,6 +24,26 @@ export function csv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+export function parseChannelAgents(value: string | undefined): Map<string, string> {
+  const pairings = new Map<string, string>();
+  for (const [index, entry] of (value ?? "").split(";").entries()) {
+    if (!entry.trim()) continue;
+    const parts = entry.split("=").map((part) => part.trim());
+    const channel = parts[0];
+    if (parts.length !== 2 || !channel || !parts[1]) {
+      console.error(`CHANNEL_AGENTS entry ${index + 1} must be CHANNEL_ID=Agent Name`);
+      if (channel && entry.includes("=") && !pairings.has(channel)) pairings.set(channel, "");
+      continue;
+    }
+    if (pairings.has(channel)) {
+      console.error(`CHANNEL_AGENTS entry ${index + 1} repeats a channel; keeping the first pairing`);
+      continue;
+    }
+    pairings.set(channel, parts[1]);
+  }
+  return pairings;
+}
+
 export const config = {
   get slackBotToken(): string {
     return requireEnv("SLACK_BOT_TOKEN");
@@ -33,6 +53,9 @@ export const config = {
   },
   get allowedChannelIds(): string[] {
     return csv(env("ALLOWED_CHANNEL_IDS"));
+  },
+  get channelAgents(): Map<string, string> {
+    return parseChannelAgents(env("CHANNEL_AGENTS"));
   },
   get approverUserIds(): string[] {
     return csv(env("APPROVER_USER_IDS"));
