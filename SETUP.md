@@ -48,7 +48,7 @@ A manifest is a settings file that Slack reads, so you do not have to click each
     Click **Show**, copy it, and save it as **SLACK_SIGNING_SECRET**.
 11. Open Slack and go to the channel the team will use. Type `/invite @SL Agents` and press Enter.
 12. Find the channel ID: click the channel name at the top, then scroll to the bottom of the
-    **About** tab. It looks like `C0C6T53G5J4`. Save it as **ALLOWED_CHANNEL_IDS**.
+    **About** tab. It looks like `C0EXAMPLE01`. Save it as **ALLOWED_CHANNEL_IDS**.
 
 > Slack may show a warning that the **Request URL** did not verify. That is normal right now,
 > because the app does not have its keys yet. You will fix it in Step E.
@@ -100,11 +100,21 @@ Environment variables are settings that Netlify gives to the app. They keep keys
    | `ANTHROPIC_WEBHOOK_SIGNING_KEY` | from Step D (starts with `whsec_`) |
    | `SLACK_BOT_TOKEN` | from Step B (starts with `xoxb-`) |
    | `SLACK_SIGNING_SECRET` | from Step B |
-   | `ALLOWED_CHANNEL_IDS` | from Step B, e.g. `C0C6T53G5J4` |
+   | `ALLOWED_CHANNEL_IDS` | from Step B, e.g. `C0EXAMPLE01` |
 
    Optional: add `APPROVER_USER_IDS` with the Slack member IDs of people allowed to press
    **Approve**. (In Slack, click a person → **⋮ More** → **Copy member ID**.) Separate several IDs
    with commas. If you leave it out, anyone in the channel can approve.
+
+   Optional: add `CHANNEL_AGENTS` to lock each channel to one agent, for example
+   `C0EXAMPLE01=CFO Agent; C0EXAMPLE02=Chief of Staff`. These are made-up channel IDs;
+   use your own IDs in Netlify. Separate pairs with semicolons. Spaces around pairs are ignored,
+   and full agent names match without regard to capital letters. Use only one pair per channel.
+   Each paired channel must also be in `ALLOWED_CHANNEL_IDS`; pairing does not grant access.
+   In a paired channel, `@SL Agents what's our runway?` goes straight to its agent.
+   Naming that agent still works, other agents are blocked, and `@SL Agents agents` lists only
+   the paired agent. Thread replies, `stop`, and Approve / Deny stay the same.
+   Leave `CHANNEL_AGENTS` empty or omit it to keep the existing behavior everywhere.
 4. Click **Deploys** at the top, then **Trigger deploy → Deploy site**.
    Netlify only reads new variables on a fresh deploy.
 5. Wait until the deploy says **Published**.
@@ -129,6 +139,8 @@ Environment variables are settings that Netlify gives to the app. They keep keys
   is in `ALLOWED_CHANNEL_IDS`, and that you redeployed after adding variables.
 - **"Working on it" appears, but no answer:** check the Console webhook URL ends in
   `/anthropic-webhook`, both event types are ticked, and `ANTHROPIC_WEBHOOK_SIGNING_KEY` matches.
+- **"This channel's agent isn't set up correctly":** check that `CHANNEL_AGENTS` uses the
+  agent's full name from the Console agent list, then redeploy.
 - **See error details:** in Netlify, open **Logs → Functions**, and pick the function
   (for example `slack-events-background` or `anthropic-webhook-background`).
 
