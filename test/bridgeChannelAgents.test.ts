@@ -81,6 +81,42 @@ describe("per-channel agent routing", () => {
     expect(vi.mocked(postNote).mock.calls[0]![2]).not.toContain("Legal Agent");
   });
 
+  describe("channel with several agents", () => {
+    beforeEach(() => vi.stubEnv("CHANNEL_AGENTS", "C0EXAMPLE01=CFO Agent, Legal Agent"));
+
+    it.each([["CFO Agent: runway?", 0], ["legal: review this", 1]] as const)("routes to a named allowed agent: %s", async (text, index) => {
+      await mention(text);
+      expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ agent: agents[index] }));
+    });
+
+    it("asks which agent when none is named", async () => {
+      await mention("What's our runway?");
+      expect(createSession).not.toHaveBeenCalled();
+      expect(postNote).toHaveBeenCalledWith("C0EXAMPLE01", "1.0", expect.stringContaining("I couldn't tell which agent you meant"));
+    });
+
+    it("lists exactly the allowed agents", async () => {
+      await mention("agents");
+      const note = vi.mocked(postNote).mock.calls[0]![2] as string;
+      expect(note).toContain("• CFO Agent");
+      expect(note).toContain("• Legal Agent");
+    });
+
+    it("blocks an agent that is not allowed and names the allowed ones", async () => {
+      vi.mocked(listAgents).mockResolvedValue([...agents, { id: "agent_mkt", name: "Marketing Agent" }]);
+      await mention("Marketing Agent: draft a post");
+      expect(createSession).not.toHaveBeenCalled();
+      expect(postNote).toHaveBeenCalledWith("C0EXAMPLE01", "1.0", "This channel is set up for CFO Agent and Legal Agent only.");
+    });
+
+    it("fails closed if any listed agent does not exist", async () => {
+      vi.stubEnv("CHANNEL_AGENTS", "C0EXAMPLE01=CFO Agent, Missing Agent");
+      await mention("CFO Agent: runway?");
+      expect(createSession).not.toHaveBeenCalled();
+      expect(postNote).toHaveBeenCalledWith("C0EXAMPLE01", "1.0", expect.stringContaining("isn't set up correctly"));
+    });
+  });
+
   it("still requires ALLOWED_CHANNEL_IDS even for a paired channel", async () => {
     vi.stubEnv("ALLOWED_CHANNEL_IDS", "C0EXAMPLE02");
     await mention("What's our runway?");
