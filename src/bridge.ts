@@ -14,7 +14,7 @@ import {
   sendUserMessage,
   userText,
 } from "./anthropic";
-import { config, consoleSessionUrl, isAllowedChannel, isApprover } from "./config";
+import { config, consoleSessionUrl, dmAgentsFor, isAllowedPlace, isApprover, isDmChannel } from "./config";
 import {
   terminalErrorMessage,
   latestIdle,
@@ -66,19 +66,38 @@ export async function handleSlackEvent(envelope: SlackEventEnvelope): Promise<vo
   const bot = await botUserId(envelope.authorizations?.[0]?.user_id);
   const c = classifySlackEvent(envelope.event, bot);
   if (c.kind === "ignore") return;
-  if (!isAllowedChannel(c.channel)) return;
+  if (!isAllowedPlace(c.channel)) return;
 
   const text = unescapeSlack(stripMentions(c.text, bot));
+  const dm = isDmChannel(c.channel);
   const thread = await getThread(c.channel, c.threadTs);
   if (thread) {
-    await handleFollowUp(c.channel, c.threadTs, c.ts, c.user, text, thread);
+    await handleFollowUp(c.channel, c.threadTs, c.ts, c.user, text, thread, dm);
     return;
   }
-  // Plain thread replies in threads we don't own are ignored. Mentions start a session.
-  if (c.kind === "mention") await startSession(c.channel, c.threadTs, c.ts, c.user, text);
+  // Plain thread replies in threads we don't own are ignored. Mentions (or top-level DMs) start a session.
+  if (c.kind !== "mention") return;
+
+  if (dm) {
+    // Direct messages: only people listed in DM_AGENTS, each with their own agents.
+    const mine = dmAgentsFor(c.user);
+    if (mine === undefined) {
+      await postNote(c.channel, c.threadTs, "Direct messages aren't set up for you yet. Ask an admin to add you to DM_AGENTS, or use one of the team channels.");
+      return;
+    }
+    await startSession(c.channel, c.threadTs, c.ts, c.user, text, { pairedNames: mine, place: "dm" });
+    return;
+  }
+  await startSession(c.channel, c.threadTs, c.ts, c.user, text, { pairedNames: config.channelAgents.get(c.channel), place: "channel" });
 }
 
-async function startSession(channel: string, threadTs: string, ts: string, user: string, text: string) {
+interface StartOptions {
+  /** Agent names this place is limited to; undefined means any agent. */
+  pairedNames: string[] | undefined;
+  place: "channel" | "dm";
+}
+
+async function startSession(channel: string, threadTs: string, ts: string, user: string, text: string, opts: StartOptions) {
   let agents: AgentRef[];
   try {
     agents = await listAgents();
@@ -87,13 +106,15 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
 
-  const pairedNames = config.channelAgents.get(channel);
+  const { pairedNames, place } = opts;
+  const setting = place === "dm" ? "DM_AGENTS" : "CHANNEL_AGENTS";
   let allowedAgents: AgentRef[] | undefined;
   if (pairedNames !== undefined) {
     const found = pairedNames.map((name) => agents.find((agent) => agent.name.trim().toLowerCase() === name.toLowerCase()));
     if (found.length === 0 || found.some((agent) => !agent)) {
-      console.error("CHANNEL_AGENTS pairing does not match an available agent; check the configured agent name");
-      await postNote(channel, threadTs, "This channel's agent isn't set up correctly. Ask an admin to check CHANNEL_AGENTS.");
+      console.error(`${setting} pairing does not match an available agent; check the configured agent name`);
+      const who = place === "dm" ? "Your direct-message agents aren't" : "This channel's agent isn't";
+      await postNote(channel, threadTs, `${who} set up correctly. Ask an admin to check ${setting}.`);
       return;
     }
     allowedAgents = [...new Map((found as AgentRef[]).map((agent) => [agent.id, agent])).values()];
@@ -107,7 +128,8 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
   if (allowedAgents && namedAgent && !allowedAgents.some((agent) => agent.id === namedAgent.agent.id)) {
     const names = allowedAgents.map((agent) => escapeSlack(agent.name));
     const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-    await postNote(channel, threadTs, `This channel is set up for ${list} only.`);
+    const where = place === "dm" ? "In direct messages you can use" : "This channel is set up for";
+    await postNote(channel, threadTs, `${where} ${list} only.`);
     return;
   }
   // A channel locked to exactly one agent needs no name; otherwise the message must name an agent.
@@ -117,7 +139,8 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
   if (!match.rest) {
-    await postNote(channel, threadTs, `What would you like to ask *${escapeSlack(match.agent.name)}*? Mention me again with your question, e.g. \`@SL Agents ${match.agent.name}: ...\``);
+    const how = place === "dm" ? `Send a new message with your question, e.g. \`${match.agent.name}: ...\`` : `Mention me again with your question, e.g. \`@SL Agents ${match.agent.name}: ...\``;
+    await postNote(channel, threadTs, `What would you like to ask *${escapeSlack(match.agent.name)}*? ${how}`);
     return;
   }
 
@@ -159,10 +182,13 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
   }
 }
 
-async function handleFollowUp(channel: string, threadTs: string, ts: string, user: string, text: string, thread: ThreadRecord) {
+async function handleFollowUp(channel: string, threadTs: string, ts: string, user: string, text: string, thread: ThreadRecord, dm = false) {
   const cmd = threadCommand(text);
   if (cmd === "reset") {
-    await postNote(channel, threadTs, "To start fresh, post a new message in the channel (not in this thread) and mention me with the agent's name.");
+    const how = dm
+      ? "To start fresh, send a new message here (not in this thread)."
+      : "To start fresh, post a new message in the channel (not in this thread) and mention me with the agent's name.";
+    await postNote(channel, threadTs, how);
     return;
   }
 
@@ -214,7 +240,7 @@ async function syncFromWebhook(sessionId: string): Promise<void> {
     const md = session.metadata ?? {};
     if (md.source !== "slack-bridge" || !md.slack_channel || !md.slack_thread_ts) return; // not one of ours
     rec = { channel: md.slack_channel, thread_ts: md.slack_thread_ts, agentName: session.agent?.name, postedEventIds: [] };
-    if (isAllowedChannel(rec.channel) && !(await getThread(rec.channel, rec.thread_ts))) {
+    if (isAllowedPlace(rec.channel) && !(await getThread(rec.channel, rec.thread_ts))) {
       await saveThread(rec.channel, rec.thread_ts, {
         sessionId,
         agentId: session.agent.id,
@@ -222,7 +248,7 @@ async function syncFromWebhook(sessionId: string): Promise<void> {
       });
     }
   }
-  if (!isAllowedChannel(rec.channel)) return;
+  if (!isAllowedPlace(rec.channel)) return;
   await syncSessionToSlack(sessionId, rec, session.status, session.agent?.name);
 }
 
@@ -341,9 +367,11 @@ export async function handleInteraction(payload: BlockActionsPayload): Promise<v
   const messageTs = payload.container?.message_ts ?? payload.message?.ts;
   const threadTs = payload.message?.thread_ts ?? payload.container?.thread_ts;
   if (!sessionId || !eventId || !user || !channel || !messageTs) return;
-  if (!isAllowedChannel(channel)) return;
+  if (!isAllowedPlace(channel)) return;
 
-  if (!isApprover(user)) {
+  // In a direct message, the person the DM belongs to may approve their own agent's requests.
+  const dmOwner = isDmChannel(channel) && dmAgentsFor(user) !== undefined;
+  if (!dmOwner && !isApprover(user)) {
     await postEphemeral({ channel, user, thread_ts: threadTs, text: "Sorry, only approved people can approve or deny agent tool requests here." });
     return;
   }
