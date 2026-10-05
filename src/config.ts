@@ -24,22 +24,24 @@ export function csv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-export function parseChannelAgents(value: string | undefined): Map<string, string> {
-  const pairings = new Map<string, string>();
+/** Parses CHANNEL_AGENTS: "CHANNEL=Agent One, Agent Two; CHANNEL2=Agent Three". Each channel maps to its list of allowed agent names. */
+export function parseChannelAgents(value: string | undefined): Map<string, string[]> {
+  const pairings = new Map<string, string[]>();
   for (const [index, entry] of (value ?? "").split(";").entries()) {
     if (!entry.trim()) continue;
     const parts = entry.split("=").map((part) => part.trim());
     const channel = parts[0];
-    if (parts.length !== 2 || !channel || !parts[1]) {
-      console.error(`CHANNEL_AGENTS entry ${index + 1} must be CHANNEL_ID=Agent Name`);
-      if (channel && entry.includes("=") && !pairings.has(channel)) pairings.set(channel, "");
+    const names = (parts[1] ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+    if (parts.length !== 2 || !channel || names.length === 0) {
+      console.error(`CHANNEL_AGENTS entry ${index + 1} must be CHANNEL_ID=Agent Name[, Agent Name...]`);
+      if (channel && entry.includes("=") && !pairings.has(channel)) pairings.set(channel, []);
       continue;
     }
     if (pairings.has(channel)) {
       console.error(`CHANNEL_AGENTS entry ${index + 1} repeats a channel; keeping the first pairing`);
       continue;
     }
-    pairings.set(channel, parts[1]);
+    pairings.set(channel, names);
   }
   return pairings;
 }
@@ -54,7 +56,7 @@ export const config = {
   get allowedChannelIds(): string[] {
     return csv(env("ALLOWED_CHANNEL_IDS"));
   },
-  get channelAgents(): Map<string, string> {
+  get channelAgents(): Map<string, string[]> {
     return parseChannelAgents(env("CHANNEL_AGENTS"));
   },
   get approverUserIds(): string[] {
