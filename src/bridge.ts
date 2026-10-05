@@ -87,28 +87,33 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
 
-  const pairedName = config.channelAgents.get(channel);
-  const pairedAgent = pairedName === undefined
-    ? undefined
-    : agents.find((agent) => agent.name.trim().toLowerCase() === pairedName.toLowerCase());
-  if (pairedName !== undefined && !pairedAgent) {
-    console.error("CHANNEL_AGENTS pairing does not match an available agent; check the configured agent name");
-    await postNote(channel, threadTs, "This channel's agent isn't set up correctly. Ask an admin to check CHANNEL_AGENTS.");
-    return;
+  const pairedNames = config.channelAgents.get(channel);
+  let allowedAgents: AgentRef[] | undefined;
+  if (pairedNames !== undefined) {
+    const found = pairedNames.map((name) => agents.find((agent) => agent.name.trim().toLowerCase() === name.toLowerCase()));
+    if (found.length === 0 || found.some((agent) => !agent)) {
+      console.error("CHANNEL_AGENTS pairing does not match an available agent; check the configured agent name");
+      await postNote(channel, threadTs, "This channel's agent isn't set up correctly. Ask an admin to check CHANNEL_AGENTS.");
+      return;
+    }
+    allowedAgents = [...new Map((found as AgentRef[]).map((agent) => [agent.id, agent])).values()];
   }
 
   if (isHelpRequest(text)) {
-    await postNote(channel, threadTs, formatAgentList(pairedAgent ? [pairedAgent] : agents));
+    await postNote(channel, threadTs, formatAgentList(allowedAgents ?? agents));
     return;
   }
   const namedAgent = matchAgent(text, agents);
-  if (pairedAgent && namedAgent && namedAgent.agent.id !== pairedAgent.id) {
-    await postNote(channel, threadTs, `This channel is set up for ${escapeSlack(pairedAgent.name)} only.`);
+  if (allowedAgents && namedAgent && !allowedAgents.some((agent) => agent.id === namedAgent.agent.id)) {
+    const names = allowedAgents.map((agent) => escapeSlack(agent.name));
+    const list = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    await postNote(channel, threadTs, `This channel is set up for ${list} only.`);
     return;
   }
-  const match = namedAgent ?? (pairedAgent ? { agent: pairedAgent, rest: text } : null);
+  // A channel locked to exactly one agent needs no name; otherwise the message must name an agent.
+  const match = namedAgent ?? (allowedAgents?.length === 1 ? { agent: allowedAgents[0]!, rest: text } : null);
   if (!match) {
-    await postNote(channel, threadTs, `I couldn't tell which agent you meant.\n\n${formatAgentList(agents)}`);
+    await postNote(channel, threadTs, `I couldn't tell which agent you meant.\n\n${formatAgentList(allowedAgents ?? agents)}`);
     return;
   }
   if (!match.rest) {
