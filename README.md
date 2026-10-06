@@ -61,7 +61,7 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
 | `SLACK_SIGNING_SECRET` | Yes | Slack app "Signing Secret". |
 | `ALLOWED_CHANNEL_IDS` | Yes | Comma-separated channel IDs where the bot works, e.g. `C0EXAMPLE01`. Empty means the bot answers nowhere. |
 | `CHANNEL_AGENTS` | No | Lock channels to one agent with semicolon-separated pairs, e.g. `C0EXAMPLE01=CFO Agent; C0EXAMPLE02=Chief of Staff`. Spaces are trimmed and full agent names ignore case. Channels must still be in `ALLOWED_CHANNEL_IDS`. Empty or missing leaves routing unchanged. |
-| `DM_AGENTS` | No | Let people use the bot in a direct message, each with their own agents: `U0EXAMPLE01=CFO Agent, Legal Agent; U0EXAMPLE02=Marketing Agent`. Empty means the bot ignores DMs. See below. |
+| `DM_AGENTS` | No | Let people use the bot in a direct message, each with their own agents: `U0EXAMPLE01=CFO Agent, Legal Agent; U0EXAMPLE02=*`. `*` means every agent. Empty means the bot ignores DMs. See below. |
 | `APPROVER_USER_IDS` | No | Comma-separated Slack user IDs allowed to press Approve / Deny. Empty means anyone in the channel. |
 | `CONSOLE_WORKSPACE` | No | Console workspace ID used in session links. Empty means `default`. |
 | `DEFAULT_ENVIRONMENT_ID` | No | Environment to use when an agent has no earlier session to copy from. |
@@ -86,6 +86,8 @@ All channel IDs shown here are made-up placeholders; replace them with your own 
 
 Set `DM_AGENTS` to let named people talk to agents in a direct message with the bot. Each entry
 is a Slack user ID and the agents that person may use, in the same format as `CHANNEL_AGENTS`.
+Use `*` instead of a list to give someone every agent, including agents added later. `*` works
+in `CHANNEL_AGENTS` too.
 In a DM no @mention is needed: `CFO Agent: what's our runway?` starts a session and the bot
 replies in a thread under that message, as in a channel. With exactly one agent, the name can be
 left out. Naming an agent not on the list gets "In direct messages you can use ... only."
