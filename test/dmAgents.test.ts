@@ -35,10 +35,10 @@ const agents = [
 
 const DM = "D0EXAMPLE01";
 
-async function dm(text: string, user = "UWENDY", threadTs?: string) {
+async function dm(text: string, user = "UWENDY", threadTs?: string, ts = "1.0") {
   await handleSlackEvent({
     type: "event_callback",
-    event: { type: "message", channel_type: "im", channel: DM, user, ts: "1.0", thread_ts: threadTs, text },
+    event: { type: "message", channel_type: "im", channel: DM, user, ts, thread_ts: threadTs, text },
   });
 }
 
@@ -115,6 +115,16 @@ describe("direct-message routing", () => {
     await dm("CFO Agent: what's our runway?");
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ agent: agents[0], titleSource: "what's our runway?" }));
     expect(await getThread(DM, "1.0")).toMatchObject({ agentId: "agent_cfo" });
+  });
+
+  it("gives every agent to a person listed as *", async () => {
+    vi.stubEnv("DM_AGENTS", "UWENDY=*");
+    await dm("Marketing Agent: draft a post");
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ agent: agents[2] }));
+    await dm("agents", "UWENDY", undefined, "2.0");
+    const note = vi.mocked(postNote).mock.calls.at(-1)![2] as string;
+    expect(note).toContain("• CFO Agent");
+    expect(note).toContain("• Marketing Agent");
   });
 
   it("needs no agent name when the person has exactly one agent", async () => {
