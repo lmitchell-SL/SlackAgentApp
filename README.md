@@ -61,6 +61,7 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
 | `SLACK_SIGNING_SECRET` | Yes | Slack app "Signing Secret". |
 | `ALLOWED_CHANNEL_IDS` | Yes | Comma-separated channel IDs where the bot works, e.g. `C0EXAMPLE01`. Empty means the bot answers nowhere. |
 | `CHANNEL_AGENTS` | No | Lock channels to one agent with semicolon-separated pairs, e.g. `C0EXAMPLE01=CFO Agent; C0EXAMPLE02=Chief of Staff`. Spaces are trimmed and full agent names ignore case. Channels must still be in `ALLOWED_CHANNEL_IDS`. Empty or missing leaves routing unchanged. |
+| `DM_AGENTS` | No | Let people use the bot in a direct message, each with their own agents: `U0EXAMPLE01=CFO Agent, Legal Agent; U0EXAMPLE02=Marketing Agent`. Empty means the bot ignores DMs. See below. |
 | `APPROVER_USER_IDS` | No | Comma-separated Slack user IDs allowed to press Approve / Deny. Empty means anyone in the channel. |
 | `CONSOLE_WORKSPACE` | No | Console workspace ID used in session links. Empty means `default`. |
 | `DEFAULT_ENVIRONMENT_ID` | No | Environment to use when an agent has no earlier session to copy from. |
@@ -81,11 +82,27 @@ the first pairing wins and an error is logged. Malformed entries are logged with
 a recognizable channel with an empty or malformed agent value stays locked with a setup error.
 All channel IDs shown here are made-up placeholders; replace them with your own in Netlify only.
 
+### Direct messages
+
+Set `DM_AGENTS` to let named people talk to agents in a direct message with the bot. Each entry
+is a Slack user ID and the agents that person may use, in the same format as `CHANNEL_AGENTS`.
+In a DM no @mention is needed: `CFO Agent: what's our runway?` starts a session and the bot
+replies in a thread under that message, as in a channel. With exactly one agent, the name can be
+left out. Naming an agent not on the list gets "In direct messages you can use ... only."
+`agents` lists only that person's agents. People not in `DM_AGENTS` get a short note saying DMs
+aren't set up for them; with `DM_AGENTS` empty, the bot ignores DMs entirely.
+In a DM the person may approve or deny their own agent's tool requests even when they are not
+in `APPROVER_USER_IDS`. Channel approvals are unchanged.
+Slack needs the `im:history` scope and the `message.im` event, plus the Messages tab in App Home,
+all included in `slack-app-manifest.yml`; after adding them, reinstall the app to the workspace.
+
 ## Security notes
 
 - **Anyone in an allowed channel can drive the agents**, including their tools and any connected
   accounts (vaults: stored logins such as Gmail or HubSpot). Treat channel membership as access to
   the agents. Keep the channel private and small.
+- A DM is private to one person, but that person has the same power over their listed agents.
+  List only agents each person should be able to run on their own.
 - Use `APPROVER_USER_IDS` so only named people can approve tool calls that need permission.
   Tools set to "always allow" on the agent run without asking, so review agent tool settings in the Console.
 - Keys live only in Netlify environment variables. Never commit them. `.env` files are git-ignored.
@@ -94,6 +111,8 @@ All channel IDs shown here are made-up placeholders; replace them with your own 
   functions re-check the forwarded signatures, so calling them directly does nothing.
 - The bridge never creates, edits or archives agents. It only starts sessions for existing agents.
 - Messages are posted to Slack, so anything an agent writes is visible to the whole channel.
+- People listed in `DM_AGENTS` can also talk to their agents in a **direct message** with the bot,
+  with no @mention: `CFO Agent: what's our runway?`. Only that person sees the conversation.
 
 ## Limits
 

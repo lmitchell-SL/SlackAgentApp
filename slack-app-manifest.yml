@@ -9,6 +9,9 @@ features:
   bot_user:
     display_name: SL Agents
     always_online: true
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
 oauth_config:
   scopes:
     bot:
@@ -16,6 +19,7 @@ oauth_config:
       - chat:write
       - channels:history
       - groups:history
+      - im:history
       - users:read
       - reactions:write
 settings:
@@ -25,6 +29,7 @@ settings:
       - app_mention
       - message.channels
       - message.groups
+      - message.im
   interactivity:
     is_enabled: true
     request_url: https://YOUR-SITE.netlify.app/slack/interactive

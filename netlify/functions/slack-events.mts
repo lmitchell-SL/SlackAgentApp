@@ -3,7 +3,7 @@
 // real work to the slack-events-background function (which answers 202 at once).
 
 import type { Config } from "@netlify/functions";
-import { config as settings, isAllowedChannel } from "../../src/config";
+import { config as settings, isAllowedPlace } from "../../src/config";
 import { forwardOnce, SLACK_SIGNATURE_HEADERS } from "../../src/handoff";
 import type { SlackEventEnvelope } from "../../src/slackEvents";
 import { verifySlackRequest } from "../../src/slackVerify";
@@ -27,7 +27,7 @@ export default async (req: Request): Promise<Response> => {
   // Slack's one-time check when you save the Request URL.
   if (body.type === "url_verification") return Response.json({ challenge: body.challenge });
 
-  if (body.type !== "event_callback" || !isAllowedChannel(body.event?.channel) || !body.event_id) return ok();
+  if (body.type !== "event_callback" || !isAllowedPlace(body.event?.channel) || !body.event_id) return ok();
 
   // Slack retries (x-slack-retry-num) are processed like first deliveries; a failed
   // hand-off answers 500 so Slack retries it.

@@ -4,6 +4,8 @@ export interface SlackMessageEvent {
   type: string;
   subtype?: string;
   channel?: string;
+  /** "im" for a direct message with the bot, "channel" / "group" otherwise. */
+  channel_type?: string;
   user?: string;
   bot_id?: string;
   text?: string;
@@ -33,6 +35,8 @@ export type Classified =
  * We handle mentions only via `app_mention`, and skip `message` events that contain
  * the bot's user id. Bot messages, edits, deletes and other subtypes are ignored, except
  * thread_broadcast and file_share, which are people writing in the thread.
+ * In a direct message (channel_type "im") no @mention is needed: a top-level message starts a
+ * session and a thread reply continues one.
  */
 export function classifySlackEvent(ev: SlackMessageEvent | undefined, botUserId: string): Classified {
   if (!ev) return { kind: "ignore", reason: "no event" };
@@ -56,7 +60,12 @@ export function classifySlackEvent(ev: SlackMessageEvent | undefined, botUserId:
   }
   if (ev.type === "message") {
     if (botUserId && text.includes(`<@${botUserId}`)) return { kind: "ignore", reason: "handled as app_mention" };
-    if (!ev.thread_ts || ev.thread_ts === ev.ts) return { kind: "ignore", reason: "not a thread reply" };
+    if (!ev.thread_ts || ev.thread_ts === ev.ts) {
+      if (ev.channel_type === "im") {
+        return { kind: "mention", channel: ev.channel, user: ev.user, text, ts: ev.ts, threadTs: ev.ts, inThread: false };
+      }
+      return { kind: "ignore", reason: "not a thread reply" };
+    }
     return { kind: "thread_message", channel: ev.channel, user: ev.user, text, ts: ev.ts, threadTs: ev.thread_ts };
   }
   return { kind: "ignore", reason: `event type ${ev.type}` };
