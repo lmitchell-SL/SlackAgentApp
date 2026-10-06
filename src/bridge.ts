@@ -106,7 +106,9 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     return;
   }
 
-  const { pairedNames, place } = opts;
+  const { place } = opts;
+  // "*" means every agent, so a person or channel can be given full access without naming each agent.
+  const pairedNames = opts.pairedNames?.includes("*") ? undefined : opts.pairedNames;
   const setting = place === "dm" ? "DM_AGENTS" : "CHANNEL_AGENTS";
   let allowedAgents: AgentRef[] | undefined;
   if (pairedNames !== undefined) {
