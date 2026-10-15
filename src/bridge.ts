@@ -158,7 +158,7 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     const existing = await getThread(channel, threadTs);
     if (existing) return await handleFollowUp(channel, threadTs, ts, user, match.rest, existing);
 
-    const [name, placement] = await Promise.all([displayName(user), resolvePlacement(match.agent.id)]);
+    const [name, placement] = await Promise.all([displayName(user), resolvePlacement(match.agent.id, undefined, user)]);
     const session = await createSession({
       agent: match.agent,
       placement,
@@ -173,7 +173,7 @@ async function startSession(channel: string, threadTs: string, ts: string, user:
     await postNote(
       channel,
       threadTs,
-      `Working on it with *${escapeSlack(match.agent.name)}*… <${consoleSessionUrl(session.id)}|View the session in the Console>\nReply in this thread to keep talking. Say \`stop\` to interrupt.`,
+      `Working on it with *${escapeSlack(match.agent.name)}*… <${consoleSessionUrl(session.id)}|View the session in the Console>\nReply in this thread to keep talking. Say \`stop\` to interrupt.${placement.userVaults ? "\nUsing your own connected accounts." : ""}`,
     );
     await addReaction(channel, ts, "eyes");
   } catch (err) {
