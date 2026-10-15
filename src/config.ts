@@ -59,6 +59,11 @@ export function parseDmAgents(value: string | undefined): Map<string, string[]> 
   return parsePairings(value, "DM_AGENTS", "USER_ID", "user");
 }
 
+/** Parses USER_VAULTS: "USER=vlt_a, vlt_b; USER2=vlt_c". Each Slack user maps to their own vault IDs. */
+export function parseUserVaults(value: string | undefined): Map<string, string[]> {
+  return parsePairings(value, "USER_VAULTS", "USER_ID", "user");
+}
+
 export const config = {
   get slackBotToken(): string {
     return requireEnv("SLACK_BOT_TOKEN");
@@ -86,6 +91,9 @@ export const config = {
   },
   get defaultVaultIds(): string[] {
     return csv(env("DEFAULT_VAULT_IDS"));
+  },
+  get userVaults(): Map<string, string[]> {
+    return parseUserVaults(env("USER_VAULTS"));
   },
   get agentSettings(): Record<string, AgentSetting> {
     const raw = env("AGENT_SETTINGS");
