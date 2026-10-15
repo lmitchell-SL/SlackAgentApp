@@ -34,6 +34,8 @@ export interface SessionPlacement {
   environment_id: string;
   vault_ids: string[];
   source: "AGENT_SETTINGS" | "recent-session" | "defaults" | "first-environment";
+  /** True when vault_ids came from USER_VAULTS for the person who started the session. */
+  userVaults?: boolean;
 }
 
 export interface PlacementSources {
@@ -44,7 +46,13 @@ export interface PlacementSources {
   defaultVaultIds: string[];
   /** First non-archived environment in the workspace, if any. */
   firstEnvironment: () => Promise<string | null>;
+  /** USER_VAULTS: Slack user ID to that person's own vault IDs. */
+  userVaults: Map<string, string[]>;
+  /** True when the vault holds at least one active (non-archived) credential. */
+  vaultHasCredentials: (vaultId: string) => Promise<boolean>;
 }
+
+export const VAULT_CHECK_CACHE_MS = 5 * 60 * 1000;
 
 const liveSources = (): PlacementSources => ({
   agentSettings: config.agentSettings,
@@ -56,6 +64,14 @@ const liveSources = (): PlacementSources => ({
     const recent = page.data[0];
     return recent?.environment_id ? { environment_id: recent.environment_id, vault_ids: recent.vault_ids ?? [] } : null;
   },
+  userVaults: config.userVaults,
+  vaultHasCredentials: (vaultId) =>
+    cached(`vault-has-credentials/${vaultId}`, VAULT_CHECK_CACHE_MS, async () => {
+      for await (const cred of anthropic().beta.vaults.credentials.list(vaultId, { limit: 20 })) {
+        if (!cred.archived_at) return true;
+      }
+      return false;
+    }),
   firstEnvironment: async () => {
     for await (const env of anthropic().beta.environments.list({ limit: 100 })) {
       if (!env.archived_at) return env.id;
@@ -66,10 +82,35 @@ const liveSources = (): PlacementSources => ({
 
 /**
  * Where a new session runs and which vaults (stored credentials) it gets:
- * 1) AGENT_SETTINGS for that agent, 2) the agent's most recent session,
- * 3) DEFAULT_ENVIRONMENT_ID / DEFAULT_VAULT_IDS, 4) the first non-archived environment.
+ * 1) AGENT_SETTINGS for that agent, 2) the agent's most recent session (with DEFAULT_VAULT_IDS
+ * when that session had no vaults), 3) DEFAULT_ENVIRONMENT_ID / DEFAULT_VAULT_IDS,
+ * 4) the first non-archived environment.
+ * Then, when the person who started the session is in USER_VAULTS, their own vaults replace
+ * the vaults chosen above (the environment stays). A listed vault with no connected accounts
+ * is skipped, and if none are left the vaults chosen above are kept, so tools never vanish
+ * just because someone has not connected their accounts yet.
  */
-export async function resolvePlacement(agentId: string, sources: PlacementSources = liveSources()): Promise<SessionPlacement> {
+export async function resolvePlacement(
+  agentId: string,
+  sources: PlacementSources = liveSources(),
+  userId?: string,
+): Promise<SessionPlacement> {
+  const base = await basePlacement(agentId, sources);
+  const mine = userId ? sources.userVaults.get(userId) : undefined;
+  if (!mine || mine.length === 0) return base;
+  const usable: string[] = [];
+  for (const vaultId of mine) {
+    try {
+      if (await sources.vaultHasCredentials(vaultId)) usable.push(vaultId);
+      else console.warn(`USER_VAULTS vault ${vaultId} has no connected accounts; skipping it`);
+    } catch (err) {
+      console.warn(`Could not check USER_VAULTS vault ${vaultId}; skipping it: ${String(err)}`);
+    }
+  }
+  return usable.length ? { ...base, vault_ids: usable, userVaults: true } : base;
+}
+
+async function basePlacement(agentId: string, sources: PlacementSources): Promise<SessionPlacement> {
   const setting = sources.agentSettings[agentId];
   if (setting?.environment_id) {
     return { environment_id: setting.environment_id, vault_ids: setting.vault_ids ?? [], source: "AGENT_SETTINGS" };
@@ -77,7 +118,12 @@ export async function resolvePlacement(agentId: string, sources: PlacementSource
 
   try {
     const recent = await sources.latestSession(agentId);
-    if (recent) return { ...recent, source: "recent-session" };
+    if (recent) {
+      // A session that ran with no vaults would otherwise pass "no credentials" on to every
+      // later session forever; fill the gap from DEFAULT_VAULT_IDS instead.
+      const vault_ids = recent.vault_ids.length ? recent.vault_ids : sources.defaultVaultIds;
+      return { environment_id: recent.environment_id, vault_ids, source: "recent-session" };
+    }
   } catch (err) {
     console.warn(`Could not list recent sessions for ${agentId}: ${String(err)}`);
   }
