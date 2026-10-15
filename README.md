@@ -36,8 +36,10 @@ Slack ──► /slack/interactive ──► slack-interactive-background ──
 2. **`slack-events-background`** checks the signature again, works out which agent you meant
    (the agent list is read live from the API and cached for 5 minutes), and creates a session.
    The session's environment and vaults come from, in order: `AGENT_SETTINGS` for that agent,
-   then that agent's most recent session, then `DEFAULT_ENVIRONMENT_ID` / `DEFAULT_VAULT_IDS`,
-   then the first non-archived environment in the workspace. Every message to the agent starts with
+   then that agent's most recent session (using `DEFAULT_VAULT_IDS` if that session had no vaults),
+   then `DEFAULT_ENVIRONMENT_ID` / `DEFAULT_VAULT_IDS`, then the first non-archived environment in
+   the workspace. If the person who starts the thread is in `USER_VAULTS`, their own vaults are used
+   instead (vaults with no connected accounts are skipped). Every message to the agent starts with
    `[From <name> via Slack]` so the agent knows who is talking.
 3. When the agent stops working, Anthropic calls **`anthropic-webhook`**. It checks the signature
    with the SDK's `client.beta.webhooks.unwrap`, drops duplicates, and hands off to
@@ -65,7 +67,8 @@ Set these in Netlify (**Site configuration → Environment variables**). See `.e
 | `APPROVER_USER_IDS` | No | Comma-separated Slack user IDs allowed to press Approve / Deny. Empty means anyone in the channel. |
 | `CONSOLE_WORKSPACE` | No | Console workspace ID used in session links. Empty means `default`. |
 | `DEFAULT_ENVIRONMENT_ID` | No | Environment to use when an agent has no earlier session to copy from. |
-| `DEFAULT_VAULT_IDS` | No | Comma-separated vault IDs to attach in that case. |
+| `DEFAULT_VAULT_IDS` | No | Comma-separated vault IDs to attach in that case, or when the agent's last session had no vaults. |
+| `USER_VAULTS` | No | Each person's own vaults: `U0EXAMPLE01=vlt_abc; U0EXAMPLE02=vlt_def`. A thread runs on the vaults of whoever started it. Vaults with no connected accounts are skipped, so people keep the usual vaults until they connect theirs. |
 | `AGENT_SETTINGS` | No | JSON map: `{"agent_id": {"environment_id": "env_...", "vault_ids": ["vlt_..."]}}`. Takes priority over copying from the agent's last session. |
 
 ### Pair a channel with an agent
